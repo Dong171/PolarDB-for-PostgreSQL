@@ -527,8 +527,19 @@ export PATH=$pg_bld_basedir/bin:$PATH
 #################### PHASE 3: compile and install ###################
 if [[ $nocompile == "off" ]];
 then
-  ./configure --prefix=$pg_bld_basedir --with-pgport=$pg_bld_port $common_configure_flag $configure_flag
-
+  ./configure --prefix=$pg_bld_basedir \
+            --with-pgport=$pg_bld_port \
+            $common_configure_flag \
+            $configure_flag \
+            --with-blocksize=32 \
+            --enable-nls=no \
+            --enable-debug=no \
+            --enable-profiling=no \
+            --disable-dtrace \
+            --with-integer-datatypes \
+            --without-readline \
+            --enable-debug=no \
+            --with-wal-block-size=32
   for target in . contrib external
   do
     make -sj`getconf _NPROCESSORS_ONLN` -C $target
@@ -572,20 +583,20 @@ fi
 
 if [[ $need_initdb == "yes" ]];
 then
-  su_eval "$pg_bld_basedir/bin/initdb -k -U $pg_db_user -D $pg_bld_master_dir $tde_initdb_args"
+ su_eval "$pg_bld_basedir/bin/initdb -U $pg_db_user -D $pg_bld_master_dir --encoding='SQL_ASCII' --locale='C' $tde_initdb_args"
 
   # common configs
   echo "polar_enable_shared_storage_mode = on
         polar_hostid = 1
-        max_connections = 100
+        max_connections = 150
         polar_wal_pipeline_enable = true
         polar_create_table_with_full_replica_identity = off
         logging_collector = on
         log_directory = 'pg_log'
 
         unix_socket_directories='.'
-        shared_buffers = '2GB'
-        synchronous_commit = on
+        shared_buffers = '8GB'
+        synchronous_commit = off
         full_page_writes = off
         #random_page_cost = 1.1
         autovacuum_naptime = 10min
@@ -944,4 +955,151 @@ then
 fi
 
 echo "rds build done"
+psql -c "ALTER SYSTEM SET polar_bulk_extend_size = '4MB';"  
+psql -c "ALTER SYSTEM SET polar_index_create_bulk_extend_size = '4MB';" 
+psql -c "ALTER SYSTEM SET work_mem = '256MB';"
+psql -c "ALTER SYSTEM SET autovacuum = 'off';"
+psql -c "ALTER SYSTEM SET checkpoint_completion_target = 0.9;"
+
+
+psql -c "ALTER SYSTEM SET effective_cache_size='12GB';"
+psql -c "ALTER SYSTEM SET max_parallel_workers_per_gather = 16 ;"
+
+psql -c "ALTER SYSTEM SET fsync='off';"
+psql -c "ALTER SYSTEM SET full_page_writes ='off';"
+psql -c "ALTER SYSTEM SET maintenance_work_mem='512MB';"
+
+psql -c "ALTER SYSTEM SET max_wal_size='256GB';"
+psql -c "ALTER SYSTEM SET min_wal_size='128GB';"
+
+psql -c "ALTER SYSTEM SET wal_buffers='32MB';"
+psql -c "ALTER SYSTEM SET wal_level='minimal';"
+psql -c "ALTER SYSTEM SET max_wal_senders=0;"
+
+psql -c "ALTER SYSTEM SET bgwriter_delay = '10ms';"
+psql -c "ALTER SYSTEM SET bgwriter_lru_maxpages = 500;"
+psql -c "ALTER SYSTEM SET bgwriter_lru_multiplier = 2.0;"
+psql -c "ALTER SYSTEM SET bgwriter_flush_after = '512kB';"
+
+psql -c "ALTER SYSTEM SET wal_log_hints = 'off';"
+psql -c "ALTER SYSTEM SET polar_force_unlogged_to_logged_table='off'"
+# psql -c "ALTER SYSTEM SET temp_buffers = '64MB';"
+
+psql -c "ALTER SYSTEM SET checkpoint_timeout ='60min';"
+psql -c "ALTER SYSTEM SET max_parallel_maintenance_workers=8;"
+
+psql -c "ALTER SYSTEM SET parallel_setup_cost = 0	;"
+psql -c "ALTER SYSTEM SET parallel_tuple_cost = 0	;"
+psql -c "ALTER SYSTEM SET max_parallel_workers = 32;"
+psql -c "ALTER SYSTEM SET max_parallel_workers_per_gather = 8 ;"
+psql -c "ALTER SYSTEM SET wal_compression ='on';"
+psql -c "ALTER SYSTEM SET old_snapshot_threshold = 10  ;"
+
+psql -c "ALTER SYSTEM SET min_parallel_table_scan_size = 0;"
+psql -c "ALTER SYSTEM SET min_parallel_index_scan_size = 0;"
+psql -c "ALTER SYSTEM SET track_counts = 'off';"
+psql -c "ALTER SYSTEM SET track_activities = 'off';"
+psql -c "ALTER SYSTEM SET polar_bulk_read_size = '2MB';"
+psql -c "ALTER SYSTEM SET enable_partitionwise_join = 'on' ;"
+psql -c "ALTER SYSTEM SET enable_partitionwise_aggregate = 'on' ;"
+psql -c "ALTER SYSTEM SET enable_parallel_hash = 'on' ;"
+psql -c "ALTER SYSTEM SET parallel_leader_participation = 'on';"
+psql -c "ALTER SYSTEM SET enable_parallel_append = 'on';"
+# psql -c "ALTER SYSTEM SET ;"
+# psql -c "ALTER SYSTEM SET ;"
+# psql -c "ALTER SYSTEM SET ;"
+# psql -c "ALTER SYSTEM SET ;"
+
+
+# # 定义所需的大页数量
+# HUGE_PAGE_COUNT=256
+
+# # 修改 /etc/sysctl.conf 文件
+# if grep -q "^vm.nr_hugepages" /etc/sysctl.conf; then
+#     # 如果已经存在，则修改
+#     sudo sed -i "s/^vm.nr_hugepages.*/vm.nr_hugepages = $HUGE_PAGE_COUNT/" /etc/sysctl.conf
+# else
+#     # 如果不存在，则添加
+#     echo "vm.nr_hugepages = $HUGE_PAGE_COUNT" | sudo tee -a /etc/sysctl.conf
+# fi
+
+# # 重新加载 sysctl 配置
+# sudo sysctl -p
+# psql -c "ALTER SYSTEM SET huge_pages ='on';"
+
+
+
+# psql -c "ALTER SYSTEM SET ;"
+# psql -c "ALTER SYSTEM SET ;"
+
+
+psql -c "SELECT pg_reload_conf();"  
+
+ 
+pg_ctl stop -D ~/tmp_master_dir_polardb_pg_1100_bld 
+pg_ctl start -D ~/tmp_master_dir_polardb_pg_1100_bld 
+
+
+
+# export PGPORT=$pg_port
+# export PGHOST=$pg_host
+# export PGDATABASE=$pg_database
+# export PGUSER=$pg_user
+
+# # clean the tpch test data
+# if [[ $clean == "on" ]]; then
+#   make clean
+#   if [[ $pg_database == "postgres" ]]; then
+#     echo "drop all the tpch tables"
+#     psql -c "drop table customer cascade"
+#     psql -c "drop table lineitem cascade"
+#     psql -c "drop table nation cascade"
+#     psql -c "drop table orders cascade"
+#     psql -c "drop table part cascade"
+#     psql -c "drop table partsupp cascade"
+#     psql -c "drop table region cascade"
+#     psql -c "drop table supplier cascade"
+#   else
+#     echo "drop the tpch database: $PGDATABASE"
+#     psql -c "drop database $PGDATABASE" -d postgres
+#   fi
+#   exit;
+# fi
+
+# ###################### PHASE 1: create table ######################  
+# if [[ $PGDATABASE != "postgres" ]]; then  
+#   echo "create the tpch database: $PGDATABASE"  
+#   psql -c "create database $PGDATABASE" -d postgres  
+# fi  
+
+# sed "s/CREATE TABLE/CREATE UNLOGGED TABLE/g" /tmp/PolarDB-for-PostgreSQL/tpch-dbgen/dss.ddl > /tmp/dss.ddl  
+# mv -f /tmp/dss.ddl /tmp/PolarDB-for-PostgreSQL/tpch-dbgen/
+  
+# psql -f $tpch_dir/dss.ddl  
+
+# execute_sql() {
+#     local sql_command="$1"
+#     psql -c "$sql_command"
+# }
+
+# # Add indexes
+# echo "Creating indexes for primary and foreign keys..."
+# execute_sql "CREATE INDEX idx_region_r_regionkey ON REGION (R_REGIONKEY);"
+# execute_sql "CREATE INDEX idx_nation_n_nationkey ON NATION (N_NATIONKEY);"
+# execute_sql "CREATE INDEX idx_nation_n_regionkey ON NATION (N_REGIONKEY);"
+# execute_sql "CREATE INDEX idx_part_p_partkey ON PART (P_PARTKEY);"
+# execute_sql "CREATE INDEX idx_supplier_s_suppkey ON SUPPLIER (S_SUPPKEY);"
+# execute_sql "CREATE INDEX idx_supplier_s_nationkey ON SUPPLIER (S_NATIONKEY);"
+# execute_sql "CREATE INDEX idx_partsupp_ps_partkey ON PARTSUPP (PS_PARTKEY);"
+# execute_sql "CREATE INDEX idx_partsupp_ps_suppkey ON PARTSUPP (PS_SUPPKEY);"
+# execute_sql "CREATE INDEX idx_customer_c_custkey ON CUSTOMER (C_CUSTKEY);"
+# execute_sql "CREATE INDEX idx_customer_c_nationkey ON CUSTOMER (C_NATIONKEY);"
+# execute_sql "CREATE INDEX idx_lineitem_l_orderkey ON LINEITEM (L_ORDERKEY);"
+# execute_sql "CREATE INDEX idx_lineitem_l_linenumber ON LINEITEM (L_LINENUMBER);"
+# execute_sql "CREATE INDEX idx_orders_o_orderkey ON ORDERS (O_ORDERKEY);"
+# execute_sql "CREATE INDEX idx_orders_o_custkey ON ORDERS (O_CUSTKEY);"
+
+# echo "Tables and indexes created successfully."
+
+
 exit 0
